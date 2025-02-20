@@ -16,6 +16,8 @@ private:
     int currentClassIndent = 0;
     bool inClassMethod = false;
     bool inMainGuard = false;
+    std::vector<std::string> mainCode;
+    std::vector<std::string> globalCode;
     
     std::map<std::string, std::string> typeMap = {
         {"int", "int"},
@@ -168,7 +170,7 @@ private:
             std::string inheritance = matches[2].str();
             definedClasses.push_back(className);
             
-            std::string result = "class " + className;
+            std::string result = "\nclass " + className;
             if (!inheritance.empty()) {
                 result += " : public " + inheritance;
             }
@@ -219,6 +221,92 @@ private:
         return line.find("if __name__ == \"__main__\":") == 0;
     }
 
+    std::string processLine(const std::string& line, int indentLevel) {
+        std::string processedLine = line;
+
+        // Skip empty lines and comments
+        if (line.empty() || line.find("#") == 0) {
+            return line;
+        }
+
+        // Convert basic Python constructs to C++
+        if (line.find("if ") == 0) {
+            processedLine = "if (" + line.substr(3) + ") {";
+        }
+        else if (line.find("else:") == 0) {
+            processedLine = "} else {";
+        }
+        else if (line.find("elif ") == 0) {
+            processedLine = "} else if (" + line.substr(5) + ") {";
+        }
+        else if (line.find("while ") == 0) {
+            processedLine = "while (" + line.substr(6) + ") {";
+        }
+        else if (line.find("for ") == 0) {
+            std::regex forInRegex("for (.*) in (.*):");
+            std::smatch matches;
+            if (std::regex_search(line, matches, forInRegex)) {
+                std::string var = matches[1].str();
+                std::string container = matches[2].str();
+                
+                if (container.find("range(") == 0) {
+                    std::regex rangeRegex("range\\((\\d+)(?:,\\s*(\\d+))?\\)");
+                    std::smatch rangeMatches;
+                    if (std::regex_search(container, rangeMatches, rangeRegex)) {
+                        std::string start = rangeMatches[1].str();
+                        std::string end = rangeMatches[2].str();
+                        if (end.empty()) {
+                            processedLine = "for(int " + var + " = 0; " + var + " < " + start + "; ++" + var + ") {";
+                        } else {
+                            processedLine = "for(int " + var + " = " + start + "; " + var + " < " + end + "; ++" + var + ") {";
+                        }
+                    }
+                } else {
+                    processedLine = "for(const auto& " + var + " : " + container + ") {";
+                }
+            }
+        }
+        else if (line.find("def ") == 0 && !inClass) {
+            std::regex defRegex("def (\\w+)\\((.*)\\):");
+            std::smatch matches;
+            if (std::regex_search(line, matches, defRegex)) {
+                std::string funcName = matches[1].str();
+                std::string params = matches[2].str();
+                processedLine = "\nauto " + funcName + "(" + params + ") {";
+            }
+        }
+        else if (line.find("return ") == 0) {
+            processedLine = "return " + line.substr(7) + ";";
+        }
+        else if (line.find("raise ") == 0) {
+            std::regex raiseRegex("raise (\\w+)\\((.*)\\)");
+            std::smatch matches;
+            if (std::regex_search(line, matches, raiseRegex)) {
+                std::string exceptionType = matches[1].str();
+                std::string message = matches[2].str();
+                processedLine = "throw std::" + exceptionType + "(" + message + ");";
+            }
+        }
+        else if (line.find("try:") == 0 || line.find("except") == 0) {
+            processedLine = handleExceptions(line);
+        }
+        else if (line.find("pass") == 0) {
+            processedLine = "// pass";
+        }
+        else {
+            processedLine = convertPythonFunction(processedLine);
+            processedLine = convertPythonOperators(processedLine);
+            processedLine = convertStringFormatting(processedLine);
+            processedLine = convertListComprehension(processedLine);
+            processedLine = convertDictComprehension(processedLine);
+            if (!processedLine.empty() && processedLine.back() != '{' && processedLine.find("//") != 0) {
+                processedLine += ";";
+            }
+        }
+
+        return processedLine;
+    }
+
 public:
     PythonToCppDecompiler(const std::string& code) : pythonCode(code) {}
 
@@ -256,8 +344,8 @@ public:
         int currentIndentLevel = 0;
         bool inClass = false;
         bool inFunction = false;
-        std::vector<std::string> mainCode;
 
+        // Process the code
         while (std::getline(ss, line)) {
             if (line.empty() || line.find_first_not_of(" \t") == std::string::npos) {
                 result << "\n";
@@ -298,80 +386,8 @@ public:
             else if (isClassMethod(line, indentLevel)) {
                 line = convertClassMethod(line);
             }
-            // Convert basic Python constructs to C++
-            else if (line.find("if ") == 0) {
-                line = "if (" + line.substr(3) + ") {";
-            }
-            else if (line.find("else:") == 0) {
-                line = "} else {";
-            }
-            else if (line.find("elif ") == 0) {
-                line = "} else if (" + line.substr(5) + ") {";
-            }
-            else if (line.find("while ") == 0) {
-                line = "while (" + line.substr(6) + ") {";
-            }
-            else if (line.find("for ") == 0) {
-                std::regex forInRegex("for (.*) in (.*):");
-                std::smatch matches;
-                if (std::regex_search(line, matches, forInRegex)) {
-                    std::string var = matches[1].str();
-                    std::string container = matches[2].str();
-                    
-                    if (container.find("range(") == 0) {
-                        std::regex rangeRegex("range\\((\\d+)(?:,\\s*(\\d+))?\\)");
-                        std::smatch rangeMatches;
-                        if (std::regex_search(container, rangeMatches, rangeRegex)) {
-                            std::string start = rangeMatches[1].str();
-                            std::string end = rangeMatches[2].str();
-                            if (end.empty()) {
-                                line = "for(int " + var + " = 0; " + var + " < " + start + "; ++" + var + ") {";
-                            } else {
-                                line = "for(int " + var + " = " + start + "; " + var + " < " + end + "; ++" + var + ") {";
-                            }
-                        }
-                    } else {
-                        line = "for(const auto& " + var + " : " + container + ") {";
-                    }
-                }
-            }
-            else if (line.find("def ") == 0 && !inClass) {
-                std::regex defRegex("def (\\w+)\\((.*)\\):");
-                std::smatch matches;
-                if (std::regex_search(line, matches, defRegex)) {
-                    std::string funcName = matches[1].str();
-                    std::string params = matches[2].str();
-                    line = "auto " + funcName + "(" + params + ") {";
-                    inFunction = true;
-                }
-            }
-            else if (line.find("return ") == 0) {
-                line = "return " + line.substr(7) + ";";
-            }
-            else if (line.find("raise ") == 0) {
-                std::regex raiseRegex("raise (\\w+)\\((.*)\\)");
-                std::smatch matches;
-                if (std::regex_search(line, matches, raiseRegex)) {
-                    std::string exceptionType = matches[1].str();
-                    std::string message = matches[2].str();
-                    line = "throw std::" + exceptionType + "(" + message + ");";
-                }
-            }
-            else if (line.find("try:") == 0 || line.find("except") == 0) {
-                line = handleExceptions(line);
-            }
-            else if (line.find("pass") == 0) {
-                line = "// pass";
-            }
             else {
-                line = convertPythonFunction(line);
-                line = convertPythonOperators(line);
-                line = convertStringFormatting(line);
-                line = convertListComprehension(line);
-                line = convertDictComprehension(line);
-                if (!line.empty() && line.back() != '{' && line.find("//") != 0) {
-                    line += ";";
-                }
+                line = processLine(line, indentLevel);
             }
 
             // Handle indentation and scope
@@ -400,15 +416,7 @@ public:
         if (!mainCode.empty()) {
             result << "\nint main() {\n";
             for (const auto& line : mainCode) {
-                std::string processedLine = line;
-                processedLine = convertPythonFunction(processedLine);
-                processedLine = convertPythonOperators(processedLine);
-                processedLine = convertStringFormatting(processedLine);
-                processedLine = convertListComprehension(processedLine);
-                processedLine = convertDictComprehension(processedLine);
-                if (!processedLine.empty() && processedLine.back() != '{' && processedLine.find("//") != 0) {
-                    processedLine += ";";
-                }
+                std::string processedLine = processLine(line, 1);
                 result << "    " << processedLine << "\n";
             }
             result << "    return 0;\n";
