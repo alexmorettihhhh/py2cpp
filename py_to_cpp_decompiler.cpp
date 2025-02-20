@@ -58,7 +58,7 @@ private:
             std::string var = matches[2].str();
             std::string after = matches[3].str();
             
-            result = "std::cout << \"" + before + "\" << " + var + " << \"" + after + "\"";
+            result = "std::cout << \"" + before + "\" << " + var + " << \"" + after + "\" << std::endl";
         }
         
         return result;
@@ -221,7 +221,7 @@ private:
         return line.find("if __name__ == \"__main__\":") == 0;
     }
 
-    std::string processLine(const std::string& line, int indentLevel) {
+    std::string processLine(const std::string& line, int indentLevel, bool inClass) {
         std::string processedLine = line;
 
         // Skip empty lines and comments
@@ -387,7 +387,7 @@ public:
                 line = convertClassMethod(line);
             }
             else {
-                line = processLine(line, indentLevel);
+                line = processLine(line, indentLevel, inClass);
             }
 
             // Handle indentation and scope
@@ -416,7 +416,7 @@ public:
         if (!mainCode.empty()) {
             result << "\nint main() {\n";
             for (const auto& line : mainCode) {
-                std::string processedLine = processLine(line, 1);
+                std::string processedLine = processLine(line, 1, false);
                 result << "    " << processedLine << "\n";
             }
             result << "    return 0;\n";
