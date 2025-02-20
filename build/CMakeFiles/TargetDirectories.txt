@@ -1,0 +1,3 @@
+E:/bot/build/CMakeFiles/py2cpp.dir
+E:/bot/build/CMakeFiles/ALL_BUILD.dir
+E:/bot/build/CMakeFiles/ZERO_CHECK.dir
